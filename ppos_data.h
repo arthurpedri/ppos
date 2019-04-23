@@ -20,6 +20,11 @@ typedef struct task_t
    int prio;
    int age;
    int exit;
+   int usertask;
+   int ticks;
+   unsigned int exe_time;
+   unsigned int proc_time;
+   unsigned int activations;
 } task_t ;
 
 // estrutura que define um semáforo
