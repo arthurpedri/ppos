@@ -17,7 +17,9 @@ typedef struct task_t
    int id ;				// identificador da tarefa
    ucontext_t context ;			// contexto armazenado da tarefa
    void *stack ;			// aponta para a pilha da tarefa
-   // ... (outros campos serão adicionados mais tarde)
+   int prio;
+   int age;
+   int exit;
 } task_t ;
 
 // estrutura que define um semáforo

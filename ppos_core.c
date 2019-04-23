@@ -3,11 +3,61 @@
 #include <ucontext.h>
 
 #include "ppos.h"
-
+//#define DEBUG 1
 #define STACKSIZE 32768		/* tamanho de pilha das threads */
 
-task_t *CurrentTask, ContextMain;
-int taskcont = 1;
+task_t *CurrentTask, ContextMain, *readyQueue, Dispatcher;
+int taskcont = 1, userTasks = 0;
+
+task_t *scheduler (){
+    if (readyQueue){
+        task_t *maior, *current;
+        maior = readyQueue;
+        maior->age = maior->age - 1;
+        current = readyQueue->next;
+        while (current != readyQueue){
+            current->age = current->age - 1;
+            if (current->age < maior->age)
+                maior = current;
+            current = current->next;
+        }
+        #ifdef DEBUG
+		printf ("Maior Prioridade: %d, id: %d ", maior->age, maior->id) ;
+		#endif
+
+        task_setprio(maior, maior->prio);
+
+        return maior;
+
+    }
+    return NULL;
+}
+
+void dispatcher_body () // dispatcher é uma tarefa
+{
+    task_t *next;
+
+    while ( userTasks > 0 )
+    {
+
+
+        next = scheduler() ;  // scheduler é uma função
+        #ifdef DEBUG
+        printf ("Dispatcher lançando tarefa %d ", next->id) ;
+		#endif
+        if (next)
+        {
+          // ações antes de lançar a tarefa "next", se houverem
+            task_switch (next) ; // transfere controle para a tarefa "next"
+         // ações após retornar da tarefa "next", se houverem
+            if (next->exit != -1){
+                free(next->stack);
+                queue_remove((queue_t**) &readyQueue, (queue_t*) next);
+            }
+        }
+    }
+    task_exit(0) ; // encerra a tarefa dispatcher
+}
 
 // Inicializa o sistema operacional; deve ser chamada no inicio do main()
 void ppos_init () {
@@ -27,6 +77,9 @@ void ppos_init () {
        ContextMain.context.uc_stack.ss_flags = 0 ;
        ContextMain.context.uc_link = 0 ;
        ContextMain.id = 0 ;
+       ContextMain.prio = 0;
+       ContextMain.age = 0;
+       ContextMain.exit = -1;
     }
     else
     {
@@ -35,7 +88,52 @@ void ppos_init () {
     }
 
     CurrentTask = &ContextMain;
+
+	task_create(&Dispatcher, dispatcher_body, "");
+
     return;
+}
+
+
+// operações de escalonamento ==================================================
+
+// libera o processador para a próxima tarefa, retornando à fila de tarefas
+// prontas ("ready queue")
+void task_yield (){
+    if (CurrentTask->id == 1){
+        task_switch(&ContextMain);
+    } else {
+        task_switch(&Dispatcher);
+    }
+
+    return;
+}
+
+// define a prioridade estática de uma tarefa (ou a tarefa atual)
+void task_setprio (task_t *task, int prio){
+    if (prio > 20){
+        prio = 20;
+    } else if (prio < -20){
+        prio = -20;
+    }
+
+    if (!task){
+        CurrentTask->prio = prio;
+        CurrentTask->age = prio;
+    } else {
+        task->prio = prio;
+        task->age = prio;
+    }
+
+    return;
+}
+
+// retorna a prioridade estática de uma tarefa (ou a tarefa atual)
+int task_getprio (task_t *task){
+    if(!task){
+        return CurrentTask->prio;
+    }
+    return task->prio;
 }
 
 // gerência de tarefas =========================================================
@@ -59,6 +157,9 @@ int task_create (task_t *task,			// descritor da nova tarefa
        task->context.uc_stack.ss_size = STACKSIZE ;
        task->context.uc_stack.ss_flags = 0 ;
        task->context.uc_link = 0 ;
+       task->prio = 0;
+       task->age = 0;
+       task->exit = -1;
     }
     else
     {
@@ -74,6 +175,14 @@ int task_create (task_t *task,			// descritor da nova tarefa
     printf ("task_create: criou tarefa %d\n", task->id) ;
     #endif
 
+    if (task->id != 1){ //not dispatcher
+        queue_append((queue_t**) &readyQueue, (queue_t*) task);
+        #ifdef DEBUG
+		printf ("Tarefa %d inserida na fila de prontas\n", task->id) ;
+		#endif
+        userTasks++;
+    }
+
     return task->id;
 
 }
@@ -84,7 +193,16 @@ void task_exit (int exitCode){
 	printf ("task_exit: tarefa %d sendo encerrada\n", CurrentTask->id) ;
 	#endif
 
-    task_switch(&ContextMain);
+    CurrentTask->exit = exitCode;
+
+
+    if(CurrentTask->id == 1){
+        free(CurrentTask->stack);
+        task_switch(&ContextMain);
+    } else {
+        userTasks--;
+        task_switch(&Dispatcher);
+    }
     return;
 }
 
