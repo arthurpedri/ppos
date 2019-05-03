@@ -93,8 +93,8 @@ void dispatcher_body () // dispatcher é uma tarefa
             }
         }
     }
-
-    task_exit(0) ; // encerra a tarefa dispatcher
+    task_switch(&ContextMain);
+    //task_exit(0) ; // encerra a tarefa dispatcher
 }
 
 // Inicializa o sistema operacional; deve ser chamada no inicio do main()
@@ -110,6 +110,7 @@ void ppos_init () {
     {
        ContextMain.stack = stack ;
        ContextMain.prev = ContextMain.next = NULL ;
+       ContextMain.waitQueue = NULL;
        ContextMain.context.uc_stack.ss_sp = stack ;
        ContextMain.context.uc_stack.ss_size = STACKSIZE ;
        ContextMain.context.uc_stack.ss_flags = 0 ;
@@ -158,8 +159,16 @@ void ppos_init () {
 
 
     CurrentTask = &ContextMain;
+    userTasks++;
+
+    queue_append((queue_t**) &readyQueue, (queue_t*) CurrentTask);
+    #ifdef DEBUG
+    printf ("Tarefa %d inserida na fila de prontas\n", CurrentTask->id) ;
+    #endif
 
 	task_create(&Dispatcher, dispatcher_body, "");
+
+    task_switch(&Dispatcher);
 
     return;
 }
@@ -222,6 +231,7 @@ int task_create (task_t *task,			// descritor da nova tarefa
     {
        task->stack = stack ;
        task->prev = task->next = NULL ;
+       task->waitQueue = NULL;
        task->id = taskcont ;
        task->context.uc_stack.ss_sp = stack ;
        task->context.uc_stack.ss_size = STACKSIZE ;
@@ -270,6 +280,16 @@ void task_exit (int exitCode){
 	#endif
 
     CurrentTask->exit = exitCode;
+    // task join
+    task_t *aux;
+    aux = CurrentTask->waitQueue;
+    while (aux){
+        queue_remove((queue_t**) &CurrentTask->waitQueue, (queue_t*) aux);
+        queue_append((queue_t**) &readyQueue, (queue_t*) aux);
+        aux = CurrentTask->waitQueue;
+    }
+
+
     CurrentTask->exe_time = systime();
 	printf("Task %d exit: execution time %d ms, processor time %d ms, %d activations\n", CurrentTask->id, CurrentTask->exe_time, CurrentTask->proc_time, CurrentTask->activations);
 
@@ -301,4 +321,17 @@ int task_switch (task_t *task){
 // retorna o identificador da tarefa corrente (main deve ser 0)
 int task_id (){
     return (CurrentTask->id);
+}
+
+
+int task_join(task_t *task){
+    if(task == NULL) return -1;
+    if(task->exit == 0) return task->exit;
+
+    queue_remove((queue_t**) &readyQueue, (queue_t*) CurrentTask);
+    queue_append((queue_t**) &task->waitQueue, (queue_t*) CurrentTask);
+
+    task_switch(&Dispatcher);
+
+    return task->exit;
 }
